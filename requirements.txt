@@ -1,0 +1,9 @@
+numpy
+pandas
+xarray
+zarr
+dask
+s3fs
+imdlib
+netCDF4
+eccodes
