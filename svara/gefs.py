@@ -134,11 +134,11 @@ def _job(init: pd.Timestamp) -> None:
     tmp.rename(C.GEFS_TMP / f"{init:%Y%m%d}.npy")  # atomic: a finished file is never partial
 
 
-def download(years, workers: int = 12, limit: int | None = None) -> None:
+def download(years, workers: int = 12, limit: int | None = None, dates=None) -> None:
     C.GEFS_TMP.mkdir(parents=True, exist_ok=True)
-    todo = [d for y in years for d in season_inits(y) if not (C.GEFS_TMP / f"{d:%Y%m%d}.npy").exists()]
+    cand = list(dates) if dates is not None else [d for y in years for d in season_inits(y)]
+    todo = [d for d in cand if not (C.GEFS_TMP / f"{d:%Y%m%d}.npy").exists()]
     todo = todo[:limit] if limit else todo
-    log.info("%d init dates to download", len(todo))
     with ProcessPoolExecutor(workers) as ex:
         futs = {ex.submit(_job, d): d for d in todo}
         for n, f in enumerate(as_completed(futs), 1):
