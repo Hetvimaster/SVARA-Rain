@@ -155,19 +155,14 @@ def build_zarr(years) -> None:
     if C.GEFS_ZARR.exists():
         shutil.rmtree(C.GEFS_ZARR)
     C.ZARR.mkdir(parents=True, exist_ok=True)
-    first = True
-    for y in years:
-        inits = [d for d in season_inits(y) if (C.GEFS_TMP / f"{d:%Y%m%d}.npy").exists()]
-        if not inits:
-            continue
-        arr = np.stack([np.load(C.GEFS_TMP / f"{d:%Y%m%d}.npy") for d in inits])
-        ds = xr.Dataset(
-            {"apcp": (("init_time", "member", "lead_day", "lat", "lon"), arr, {"units": "mm"})},
-            coords={"init_time": inits, "member": list(C.MEMBERS),
-                    "lead_day": np.arange(1, C.MAX_LEAD + 1), "lat": C.LAT, "lon": C.LON},
-        ).chunk({"init_time": 16})
-        if first:
-            ds.to_zarr(C.GEFS_ZARR, mode="w")
-            first = False
-        else:
-            ds.to_zarr(C.GEFS_ZARR, mode="a", append_dim="init_time")
+    inits = [d for y in years for d in season_inits(y)
+             if (C.GEFS_TMP / f"{d:%Y%m%d}.npy").exists()]
+    if not inits:
+        return
+    arr = np.stack([np.load(C.GEFS_TMP / f"{d:%Y%m%d}.npy") for d in inits])
+    ds = xr.Dataset(
+        {"apcp": (("init_time", "member", "lead_day", "lat", "lon"), arr, {"units": "mm"})},
+        coords={"init_time": inits, "member": list(C.MEMBERS),
+                "lead_day": np.arange(1, C.MAX_LEAD + 1), "lat": C.LAT, "lon": C.LON},
+    ).chunk({"init_time": 16})
+    ds.to_zarr(C.GEFS_ZARR, mode="w")
