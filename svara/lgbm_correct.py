@@ -176,7 +176,9 @@ def main() -> None:
             qm = QMap(pv[lead], o_va, w.reindex(va).to_numpy())
             out.loc[{"lead_day": lead}] = qm(pt[lead])
         fcs[name] = out
-
+    (C.DATA / "products").mkdir(parents=True, exist_ok=True)
+    fcs["lgbm_regime"].to_dataset(name="rain").drop_encoding().to_zarr(
+        C.DATA / "products" / "corrected_test.zarr", mode="w")
     wte = w.reindex(te)
     res = evaluate(fcs, obs, obs_lab, wte)
     OUT_METRICS.parent.mkdir(parents=True, exist_ok=True)
