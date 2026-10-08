@@ -56,7 +56,9 @@ def features(raw, inits, lead, zf: pd.DataFrame, with_regime: bool):
     if with_regime:
         z = zf.z_f.reindex(inits).to_numpy()
         code = zf.fc_regime.map(REG_CODE).reindex(inits).to_numpy()
-        cols |= {"z_f": bc(z), "reg_code": bc(code)}
+        pa = zf.p_active.reindex(inits).to_numpy()
+        pb = zf.p_break.reindex(inits).to_numpy()
+        cols |= {"z_f": bc(z), "reg_code": bc(code), "p_active": bc(pa), "p_break": bc(pb)}
     return np.stack(list(cols.values()), -1), list(cols)
 
 
@@ -135,7 +137,10 @@ def main() -> None:
 
     obs_lab = pd.read_csv(LABELS, parse_dates=["date"]).set_index("date").regime
     fcl = pd.read_csv(FC_LABELS, parse_dates=["init_time", "date"])
-    zfs = {lead: g.set_index("init_time")[["z_f", "fc_regime"]] for lead, g in fcl.groupby("lead")}
+    rp = pd.read_csv(C.DATA / "labels" / "regime_proba.csv", parse_dates=["init_time"])
+    fcl = fcl.merge(rp[["init_time", "lead", "p_active", "p_break"]], on=["init_time", "lead"], how="left")
+    zfs = {lead: g.set_index("init_time")[["z_f", "fc_regime", "p_active", "p_break"]]
+           for lead, g in fcl.groupby("lead")}
     fc_lab = {lead: z.fc_regime for lead, z in zfs.items()}
     obs = xr.open_zarr(C.IMD_ZARR).obs
     land = obs.notnull().any("time").values

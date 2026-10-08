@@ -94,7 +94,10 @@ def main() -> None:
     OUT_PROB = C.DATA / "products" / f"prob_test{sfx}.zarr"
     obs_lab = pd.read_csv(LABELS, parse_dates=["date"]).set_index("date").regime
     fcl = pd.read_csv(FC_LABELS, parse_dates=["init_time", "date"])
-    zfs = {lead: g.set_index("init_time")[["z_f", "fc_regime"]] for lead, g in fcl.groupby("lead")}
+    rp = pd.read_csv(C.DATA / "labels" / "regime_proba.csv", parse_dates=["init_time"])
+    fcl = fcl.merge(rp[["init_time", "lead", "p_active", "p_break"]], on=["init_time", "lead"], how="left")
+    zfs = {lead: g.set_index("init_time")[["z_f", "fc_regime", "p_active", "p_break"]]
+           for lead, g in fcl.groupby("lead")}
     obs = xr.open_zarr(C.IMD_ZARR).obs
     land = obs.notnull().any("time").values
     raw = xr.open_zarr(C.GEFS_ZARR).apcp

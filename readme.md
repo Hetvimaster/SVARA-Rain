@@ -1,90 +1,89 @@
 # SVARA-Rain: Regime-Aware AI Post-Processing of Monsoon Rainfall Forecasts
 
-**Smart India Hackathon 2026** | Problem Statement **SIH26080** | Theme: Smart Automation | Category: Software | Team **SVARA** 
+**Smart India Hackathon 2026** | Problem Statement **SIH26080** | Theme: Smart Automation | Category: Software | Team **SVARA** (ID 134437)
 
-> Raw ensemble rainfall forecasts are biased, and the bias is **not the same in every weather situation**. SVARA first identifies the monsoon regime (active, break, ...), then corrects rainfall **separately for each regime**, instead of applying one global correction.
-
----
-
-## 1. The idea in one minute
-
-| Step | What happens |
-|---|---|
-| 1. Identify the regime | Classify each forecast day as *active*, *break* or *normal* monsoon (later also monsoon low, orographic, coastal) |
-| 2. Test before claiming | A **gate test** checks, with confidence intervals, whether raw forecast bias really differs by regime. We only build regime-specific correction if the evidence supports it |
-| 3. Correct per regime | Quantile mapping per regime, then LightGBM conditioned on regime probabilities |
-| 4. Calibrated probabilities | Heavy (>= 64.5 mm) and very heavy (>= 115.6 mm) rain, using IMD's own categories |
-| 5. Deliver | District-level table and map, plus a verification report (RMSE, ETS, CSI, POD, FAR, FSS), split by regime, lead day and threshold |
-
-**Our commitment is honest reporting.** Every score is shown against the raw forecast and a global correction. If regime-awareness does not help, we say so.
+> Raw ensemble rainfall forecasts are biased, and the bias is not the same in every weather situation. SVARA first identifies the monsoon regime, then corrects rainfall and estimates heavy-rain probabilities with regime information, instead of one global correction. **Every score is reported with confidence intervals, against the raw forecast and a global correction.**
 
 ---
 
-## 2. Project status (what is built vs. planned)
+## 1. Proposed architecture
 
-This repository is a **working prototype of the data and evidence layers**. The modelling and dashboard layers are **not built yet**.
-
-| Stage | Status | Notes |
+| Stage | Description | Status |
 |---|---|---|
-| IMD 0.25 deg truth data | Done | Daily rain 2010-2019, stored as Zarr on the 129 x 135 grid |
-| GEFSv12 reforecast download | Done | Lead days 1-5, 5 members, summed to IMD rain days (03 to 03 UTC) |
-| Time-alignment check | Done | Verified with data, see Section 4 |
-| Day-level regime labels (active / break / normal) | Done | Rajeevan-style, from core-monsoon-zone rainfall anomaly |
-| Gate test (does bias differ by regime?) | Done (code) | Result on current sample: **inconclusive**, larger run in progress |
-| Regime-targeted larger download (2015-2019) | In progress | ~261 init dates chosen by regime |
-| Monsoon low / depression labels (ERA5) | Planned | Needs Copernicus CDS access |
-| Orographic and coastal grid-level regimes | Planned | Needs terrain data |
-| Regime classifier (forecast fields only) | Planned | |
-| Per-regime quantile mapping, LightGBM | Planned | |
-| Calibrated heavy / very heavy probabilities | Planned | |
-| District product, verification report | Planned | |
-| FastAPI and Streamlit dashboard | Planned | |
+| 1. Data | GEFSv12 reforecast (5 members, lead days 1-5) as raw NWP; IMD 0.25 deg rainfall as truth; ERA5 only for regime labels | Forecast and IMD data built; ERA5 planned |
+| 2. Alignment and features | IMD-day (03-03 UTC) totals on the IMD grid; ensemble mean, spread, exceedance fractions, neighbourhood statistics, location, season | Built. Moisture, CAPE, 850 hPa wind and vorticity, terrain, distance to coast: next |
+| 3. Regime layer | Day level: active, break, monsoon low/depression. Grid level: orographic, coastal, plain. Western-disturbance flag | Active / break / normal built (forecast-implied, from core-monsoon-zone anomaly). Remaining regimes and a trained classifier: next |
+| 4. Correction and probabilities | Quantile mapping per regime; LightGBM conditioned on regime information; calibrated probabilities for heavy (>= 64.5 mm) and very heavy (>= 115.6 mm) rain | Built with the first regime layer; to be extended with the full regime layer |
+| 5. Outputs | District table and map, verification report (RMSE, ETS, CSI, POD, FAR, FSS), dashboard | Gridded probabilities, verification tables, replay demo built; district product and PDF report planned |
+
+The model ladder (raw, global quantile mapping, regime quantile mapping, LightGBM, LightGBM + regime) is scored identically at every rung, so the contribution of each added piece of information is measurable.
 
 ---
 
-## 3. Repository layout
+## 2. What makes the approach rigorous
+
+1. **Gate test before modelling.** Block-bootstrap confidence intervals check whether raw bias differs by regime.
+2. **Forecast-derived regimes.** Grouping by the regime of the *observed* rainfall makes break days look too wet and active days too dry by construction. Deployable regimes here come from the forecast, which is also what is available in real time. An observed-regime oracle is kept only as a non-deployable upper bound.
+3. **Weighted sampling.** The download keeps every active and break day but every 4th normal day. Training and scoring use inverse-selection-probability weights.
+4. **No leakage.** Splits are by whole years. Calibration and early stopping use a validation year never used for fitting.
+5. **Multiple-comparison awareness.** Comparison tables report how many results were significant against how many are expected by chance.
+6. **Verified time alignment.** A coverage check fails loudly on any gap, and a data-based test confirms the day convention.
+7. **Frozen-model training data.** The GEFSv12 reforecast keeps the model version fixed across years.
+8. **IMD's own heavy-rain categories**, with probabilities kept consistent across thresholds.
+
+---
+
+## 3. Interim results (first prototype stage)
+
+These come from the first stage, where regime information is limited to two day-level features (forecast core-zone anomaly and an active/break code). Moisture, CAPE, wind, terrain, ERA5-based regimes and a trained regime classifier are not yet included. Numbers will be refreshed after the 2010-2014 extension.
+
+**Spatial-context ML versus global quantile mapping.** At 15.6 mm/day, LightGBM improves ETS by 0.02 to 0.03 over global quantile mapping at all five lead days, with every confidence interval excluding zero (test years 2018-2019). Neighbourhood rainfall features carry most of the model's gain.
+
+**Heavy rain (>= 64.5 mm/day).** Both quantile mapping and LightGBM are far better than the raw ensemble mean, which under-forecasts heavy-rain frequency (ETS at lead 3: raw 0.05, global QM 0.12, LightGBM 0.13, LightGBM + regime 0.14).
+
+**Calibrated probabilities.** Brier skill score against climatology is 0.07 to 0.13 at >= 64.5 mm and 0.02 to 0.06 at >= 115.6 mm. The raw ensemble exceedance fraction has about zero or negative skill at 64.5 mm. Probabilities are well calibrated up to about 0.2 and overconfident above 0.3.
+
+**Regime information at this stage.** Over 261 test start dates in five leave-one-year-out folds, regime-versus-no-regime Brier differences are small and mostly within their confidence intervals (2 of 40 comparisons significant, about 2 expected by chance). Very heavy rain on active-monsoon days at leads 2-3 is the one place a positive signal appears, and it needs more data. We treat the contribution of regime information as **still to be established with the full regime layer and the larger 2010-2019 sample**.
+
+---
+
+## 4. Repository layout
 
 ```
 svara/
   config.py          paths, grid, ensemble members, season, IMD day-label convention
-  imd.py             download IMD 0.25 deg daily rainfall -> data/zarr/imd_rain.zarr
-  gefs.py            download GEFSv12 reforecast rainfall (AWS), decode GRIB2, build IMD-day totals
+  imd.py             IMD 0.25 deg daily rainfall -> Zarr
+  gefs.py            GEFSv12 reforecast download, GRIB2 decode, IMD-day totals
   align.py           pairing forecasts with observations on the right valid day
   build_data.py      command-line entry point for the data steps
   check_alignment.py tests which day shift makes forecast and observation agree best
-  regimes.py         day-level active / break / normal labels
-  gate.py            gate test: raw bias by regime, block-bootstrap confidence intervals
-  plan_dates.py      chooses which forecast start dates to download (regime-targeted)
-requirements.txt
+  regimes.py         observed day-level active / break / normal labels
+  fc_regimes.py      forecast-implied regimes, gate test on them
+  gate.py            gate test with block-bootstrap intervals
+  plan_dates.py      regime-targeted choice of forecast start dates
+  metrics.py         verification metrics, selection weights
+  compare.py         bootstrap comparison between ladder rungs
+  qmap.py            quantile-mapping baselines (global, forecast-regime, oracle)
+  lgbm_correct.py    LightGBM correction with / without regime features
+  prob.py            calibrated heavy / very heavy probabilities
+  pool_prob.py       pooled leave-one-year-out comparison
+  run_folds.py       all leave-one-year-out folds, then pooling
+app.py               Streamlit replay demo
+api.py               FastAPI service
 ```
 
 ---
 
-## 4. Methods and findings so far
+## 5. Data
 
-### Data (all public, no licence cost)
-- **Forecasts:** NOAA GEFSv12 **reforecast** (2000-2019), 5 ensemble members, lead days 1-5, via the AWS open-data bucket.
-- **Truth:** IMD 0.25 deg gridded daily rainfall, via `imdlib`.
-- **Regime labels (planned extension):** ERA5.
-
-### Aligning forecasts to the IMD rain day
-GEFS rainfall comes as overlapping 3-hourly and 6-hourly accumulation windows. We recover clean 3-hourly amounts (6 h window minus the 3 h window for the second half of each block) and sum them into **03 UTC to 03 UTC** days. A coverage check requires exactly 24 hours in every lead day, so a misalignment fails loudly instead of silently.
-
-### Verifying the day convention
-`check_alignment.py` correlates forecast anomalies with IMD at several day shifts. On 15 start dates the correlation peaks at lag 1 (0.29, versus 0.13 at lag 0 and lag 2), confirming `IMD_LABEL = "end"`.
-
-### Regime labels
-Days are labelled from the standardised, 15-day-smoothed rainfall anomaly over the core monsoon zone (18-28 N, 65-88 E): **active** if the anomaly is >= +1 standard deviation for 3 or more consecutive days, **break** if <= -1 for 3 or more. Over 2010-2019 this gives about 8% active, 11% break and 80% normal days.
-
-### Gate test
-`gate.py` computes the raw forecast bias for each regime and lead day, with circular block-bootstrap 95% intervals, and checks whether each regime differs from normal days. On the current small sample the result is **inconclusive**: a "break days lean wet" signal rests on essentially one 12-day spell, and active days show no signal. We are not drawing conclusions from this yet.
-
-### One observation so far
-Lead-day 1 forecasts are about 8-12% wetter per day than later leads, with no spin-up spike. This looks like a real model property, so correction models will take lead day as an input.
+- **Forecasts:** NOAA GEFSv12 reforecast, 5 members, lead days 1-5 (AWS open data).
+- **Truth:** IMD 0.25 deg gridded daily rainfall via `imdlib`, 2010-2019.
+- **Current sample:** 261 regime-targeted start dates (2015-2019). Extension to 2010-2014 is on the roadmap.
+- **Observed regime shares (2010-2019):** about 8% active, 11% break, 80% normal.
 
 ---
 
-## 5. Quick start
+## 6. Quick start
 
 Requires Python 3.10+.
 
@@ -92,40 +91,52 @@ Requires Python 3.10+.
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 1. IMD truth
 python -m svara.build_data --years 2010 2011 2012 2013 2014 2015 2016 2017 2018 2019 --steps imd
-
-# 2. Regime labels (needs >= 10 seasons of IMD data)
 python -m svara.regimes
+python -m svara.plan_dates --years 2010 2019
+python -m svara.build_data --years 2010 2011 2012 2013 2014 2015 2016 2017 2018 2019 \
+       --steps gefs zarr --dates-file data/labels/init_plan.txt --workers 6
 
-# 3. A small GEFS sample, then verify the time alignment
-python -m svara.build_data --years 2019 --steps gefs zarr --limit 12 --workers 6
-python -m svara.check_alignment
-
-# 4. Regime-targeted download of the dates that matter, then the gate test
-python -m svara.plan_dates --years 2015 2019
-python -m svara.build_data --years 2015 2016 2017 2018 2019 --steps gefs zarr \
-       --dates-file data/labels/init_plan.txt --workers 6
 python -m svara.gate
+python -m svara.fc_regimes
+python -m svara.qmap --train-years 2015 2016 2017 --test-years 2018 2019
+python -m svara.lgbm_correct --train-years 2015 2016 --val-years 2017 --test-years 2018 2019
+python -m svara.run_folds
+
+python -m streamlit run app.py
+uvicorn api:app --reload
 ```
 
-Downloads resume safely: finished start dates are skipped. The regime-targeted run takes a few hours.
+Downloads resume safely: finished start dates are skipped.
 
 ---
 
-## 6. Design choices and limitations (stated openly)
+## 7. Roadmap
 
-- **Regime labels are proxies, not official IMD records.** The thresholds above are documented and can be changed.
-- **Pooled standard deviation** over all June-September days is used for the anomaly, which probably under-detects June spells. A per-month alternative is available if needed.
-- **Targeted sampling:** the download keeps every active and break day but only every 4th normal day. Each regime's bias is measured only on its own days, so this does not bias the regime means; it only widens the interval for the normal group slightly.
-- **Rare events:** heavy and very heavy rainfall are rare, so evaluation is noisy. We will report event counts and avoid strong claims on the rarest categories.
-- **Reforecast ends in 2019.** Training and validation use the frozen-model reforecast, split by whole years (never random days, to avoid leakage). The 2020 monsoon season is excluded (model transition). Testing on 2021 onward needs the operational GEFS archive, which has a different file layout; an input adapter for it is planned.
-- **Western disturbances** fall outside June-September and are handled in the plan by an interaction flag plus a separate winter module (not built yet).
-- **Not an official forecast.** Outputs are an AI-assisted post-processing guidance product and not an IMD warning.
+1. Extend the sample to 2010-2019 and refresh all results.
+2. Add moisture, CAPE, 850 hPa wind and vorticity, terrain and distance-to-coast features.
+3. Add ERA5 monsoon-low / depression labels and grid-level orographic and coastal regimes.
+4. Train the regime classifier on forecast fields only and use its probabilities in the correction models.
+5. Frequency-bias adjustment of the final correction, and recalibration of probabilities with more validation data.
+6. District aggregation and PDF verification report.
+7. Operational GEFS input adapter and out-of-period test.
 
 ---
 
-## 7. Data sources and references
+## 8. Limitations (stated openly)
+
+- Regime labels are proxies, not official IMD records. Thresholds are documented and adjustable.
+- The current prototype implements only the first regime layer (see Section 3), so its results describe that layer and not the full proposed architecture.
+- Heavy and very heavy rainfall are rare and strongly correlated in space and time. Intervals are bootstrapped over days in blocks, and rare categories should not be over-interpreted.
+- At lead 1 the LightGBM correction over-forecasts 15.6 mm and 64.5 mm events (frequency bias about 1.3-1.5). A frequency-bias adjustment is on the roadmap.
+- Probabilities above about 0.3 are overconfident; calibration used a single validation year.
+- The reforecast ends in 2019. Operational-era testing needs an input adapter for the GEFS operational archive.
+- Western disturbances (outside June-September) are handled by a planned flag and winter module, not yet built.
+- **Not an official forecast.** Outputs are AI-assisted post-processing guidance, not an IMD warning.
+
+---
+
+## 9. Data sources and references
 
 - GEFSv12 reforecast (AWS open data): https://registry.opendata.aws/noaa-gefs-reforecast/
 - GEFS operational archive (AWS): https://registry.opendata.aws/noaa-gefs/
@@ -139,4 +150,4 @@ Data are used under their open-data / research-use terms, with attribution.
 
 ---
 
-**Team SVARA** | SIH26080 
+**Team SVARA** | SIH26080
